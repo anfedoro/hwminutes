@@ -473,6 +473,17 @@ import os
 # function which upload files to a given google drive folder
 
 
+def get_file_id(drive_service, folder_id, file_name):
+    """Get the file ID of a file in a specific folder by its name."""
+    query = f"'{folder_id}' in parents and name='{file_name}'"
+    results = drive_service.files().list(q=query, fields="files(id, name)").execute()
+    files = results.get("files", [])
+
+    if not files:
+        return None
+    return files[0]["id"]
+
+
 def upload_to_drive(drive_service, folder_id, file_path):
     """
     Upload a file to a given folder on Google Drive.
@@ -480,20 +491,34 @@ def upload_to_drive(drive_service, folder_id, file_path):
     - drive_service: The Drive API service instance.
     - folder_id: The ID of the folder to upload the file to.
     - file_path: The path to the files to upload.
-
     """
-    # Metadata about the file we will upload
-    file_metadata = {"name": os.path.basename(file_path), "parents": [folder_id]}
+    file_name = os.path.basename(file_path)
+    file_metadata = {"name": file_name, "parents": [folder_id]}
 
-    # Upload the file to Google Drive
+    # Check if the file already exists in the folder
+    existing_file_id = get_file_id(drive_service, folder_id, file_name)
 
     media = MediaFileUpload(file_path, resumable=True)
-    request = drive_service.files().create(
-        body=file_metadata, media_body=media, fields="id"
-    )
+
     try:
-        file_info = request.execute()
-        print(f"\tUploaded {file_path} to Drive, File ID: {file_info['id']}")
+        if existing_file_id:
+            # Update the existing file (Note: We remove the 'parents' key from the metadata)
+            update_metadata = {"name": file_name}
+            request = drive_service.files().update(
+                fileId=existing_file_id,
+                body=update_metadata,
+                media_body=media,
+                fields="id",
+            )
+            file_info = request.execute()
+            print(f"\tUpdated {file_path} on Drive, File ID: {file_info['id']}")
+        else:
+            # Create a new file
+            request = drive_service.files().create(
+                body=file_metadata, media_body=media, fields="id"
+            )
+            file_info = request.execute()
+            print(f"\tUploaded {file_path} to Drive, File ID: {file_info['id']}")
     except HttpError as error:
         print(f"\tAn error occurred: {error}")
 
