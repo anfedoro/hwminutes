@@ -1,10 +1,10 @@
 # %%
 # script using the eniscope API to retrive organization alarm settings and control monitored equipment work our of working hours
-
+# version 1.1
 import eniscopeapi as es
 import pandas as pd
 import credentials as cr
-import time
+import time, datetime
 import os, ast, pprint
 
 import openpyxl
@@ -13,6 +13,7 @@ from openpyxl.styles import Font, Border, Side, PatternFill, Alignment
 # %%
 
 config_file = "orgs_to_monitor.cfg"
+UPLOAD_FILES = True
 
 # define list of organizations and equipment datachannels to be monitored
 default_config = {
@@ -47,12 +48,16 @@ default_config = {
 # check if configuration file orgs_to_monitor.cfg exist, if yes, then read it into monitoring list dictionary, if not - then create a new one and store as JSON default_monitoring_list
 
 
-config_file = "orgs_to_monitor.cfg"
+config_file = "orgs_to_monitor.conf"
 
 
 def write_default_config():
     with open(config_file, "w") as f:
         f.write(pprint.pformat(default_config))
+
+
+def current_time():
+    return datetime.datetime.now().strftime("[%Y-%m-%d %H:%M:%S]: ")
 
 
 def read_config():
@@ -61,7 +66,9 @@ def read_config():
         try:
             return ast.literal_eval(content)
         except ValueError:
-            print("Error: Configuration file is not a valid Python dictionary.")
+            print(
+                f"{current_time()}Error: Configuration file is not a valid Python dictionary."
+            )
             return {}
 
 
@@ -72,11 +79,16 @@ if not os.path.exists(config_file):
 else:
     monitoring_list = read_config()
 
+    # report export to excel file
+folder_path = f"./reports"
+if not os.path.exists(folder_path):
+    os.makedirs(folder_path)
+
 # check if hwminutes_summary.csv exists, then read it to dataframe hwminutes_summary
-if not os.path.exists("hwminutes_summary.xlsx"):
+if not os.path.exists("./reports/hwminutes_summary.xlsx"):
     hwminutes_summary = pd.DataFrame()
 else:
-    hwminutes_summary = pd.read_excel("hwminutes_summary.xlsx")
+    hwminutes_summary = pd.read_excel("./reports/hwminutes_summary.xlsx")
 
 
 # %%
@@ -86,34 +98,46 @@ api = es.EniscopeAPIClient(cr.api_key)
 
 # authenticate the API object
 if not api.authenticate_user():
-    print("Authentication failed")
+    print(f"{current_time()}Authentication failed")
     exit()
 else:
-    print("Authentication successful")
+    print(f"{current_time()}Authentication successful")
 
 # Run dtata collection and report prepare for ech organisation in the monitoring list
 
 for org_to_monitor in monitoring_list.keys():
     # get organization id for the organization to be monitored
-    print(f'Getting organization id for "{org_to_monitor}"...', end="", flush=True)
+    print(
+        f'{current_time()}Getting organization id for "{org_to_monitor}"...',
+        end="",
+        flush=True,
+    )
     org = api.get_organizations_list(organization_name=org_to_monitor)[0]
     print("done")
     org_id = org["organizationId"]
 
     # get list of channels for the organization
-    print(f'Getting list of channels for "{org_to_monitor}"...', end="", flush=True)
+    print(
+        f'{current_time()}Getting list of channels for "{org_to_monitor}"...',
+        end="",
+        flush=True,
+    )
     channels = api.get_channels_list(organization_id=org_id)
     print("done")
 
     # retrive the alarm settings for the organization
-    print(f'Getting alarm settings for "{org_to_monitor}"...', end="", flush=True)
+    print(
+        f'{current_time()}Getting alarm settings for "{org_to_monitor}"...',
+        end="",
+        flush=True,
+    )
     alarms, rules, periods = api.get_alarm_data(organization_id=org_id)
     print("done")
 
     # %%
     # create dataframes for channels, alarms, rules and periods for the whole organization
 
-    print("Alarms data prerocessing...", end="")
+    print(f"{current_time()}Alarms data prerocessing...", end="")
 
     channels_df = pd.DataFrame.from_dict(channels)
     alarms_df = pd.DataFrame.from_dict(alarms)
@@ -228,7 +252,7 @@ for org_to_monitor in monitoring_list.keys():
         fields.append("E")
 
     print(
-        f'Geting channels readings for {org_to_monitor} for {pd.to_datetime(startTimestamp, unit="s", utc=True).tz_convert(org["timeZone"]).date()}...',
+        f'{current_time()}Geting channels readings for {org_to_monitor} for {pd.to_datetime(startTimestamp, unit="s", utc=True).tz_convert(org["timeZone"]).date()}...',
         end="",
         flush=True,
     )
@@ -257,7 +281,7 @@ for org_to_monitor in monitoring_list.keys():
 
     report = pd.DataFrame()
 
-    print("Calculating alarms activation...", end="", flush=True)
+    print(f"{current_time()}Calculating alarms activation...", end="", flush=True)
 
     for channel_id in sorted(channel_data_df["channelId"].unique().tolist()):
         ch_alarms = alarms_to_monitor[alarms_to_monitor["channelId"] == channel_id]
@@ -372,10 +396,6 @@ for org_to_monitor in monitoring_list.keys():
     )
 
     # %%
-    # report export to excel file
-    folder_path = f"./reports"
-    if not os.path.exists(folder_path):
-        os.makedirs(folder_path)
 
     # Define the Excel file path
     file_path = f"./reports/{org_to_monitor}_alarms_report.xlsx"
@@ -441,7 +461,8 @@ for org_to_monitor in monitoring_list.keys():
         # insert date column to report_sum and remove summary line
         report_sum.insert(0, "Date", reportDate)
         report_sum = report_sum.iloc[:-1]
-    print(f"Report for {org_to_monitor} is ready.\n")
+    print(f"{current_time()}Report for {org_to_monitor} is ready.\n")
+
     # check is lines with same date and organization exist in hwminutes_summary dataframe and delete them, then append report_sum to hwminutes_summary
     if not hwminutes_summary.empty:
         hwminutes_summary = hwminutes_summary[
@@ -456,98 +477,105 @@ for org_to_monitor in monitoring_list.keys():
     else:
         hwminutes_summary = report_sum.copy()
 
+    print(f"{current_time()}Summary for {org_to_monitor} is updated.\n")
 
 # save updated hwminutes_summary to csv file
 hwminutes_summary.to_excel("./reports/hwminutes_summary.xlsx", index=False)
 
 
-print("Copy reports and updated summary to a Google Drive:")
 # %%
-from oauth2client.service_account import ServiceAccountCredentials
-from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
-from googleapiclient.http import MediaFileUpload
-from google.oauth2.service_account import Credentials as ServiceAccountCredentials
-import os
+if UPLOAD_FILES == True:
+    from oauth2client.service_account import ServiceAccountCredentials
+    from googleapiclient.discovery import build
+    from googleapiclient.errors import HttpError
+    from googleapiclient.http import MediaFileUpload
+    from google.oauth2.service_account import Credentials as ServiceAccountCredentials
+    import os
 
-# function which upload files to a given google drive folder
+    # function which upload files to a given google drive folder
 
+    print("{current_time()}Copy reports and updated summary to a Google Drive:")
 
-def get_file_id(drive_service, folder_id, file_name):
-    """Get the file ID of a file in a specific folder by its name."""
-    query = f"'{folder_id}' in parents and name='{file_name}'"
-    results = drive_service.files().list(q=query, fields="files(id, name)").execute()
-    files = results.get("files", [])
+    def get_file_id(drive_service, folder_id, file_name):
+        """Get the file ID of a file in a specific folder by its name."""
+        query = f"'{folder_id}' in parents and name='{file_name}'"
+        results = (
+            drive_service.files().list(q=query, fields="files(id, name)").execute()
+        )
+        files = results.get("files", [])
 
-    if not files:
-        return None
-    return files[0]["id"]
+        if not files:
+            return None
+        return files[0]["id"]
 
+    def upload_to_drive(drive_service, folder_id, file_path):
+        """
+        Upload a file to a given folder on Google Drive.
+        Parameters:
+        - drive_service: The Drive API service instance.
+        - folder_id: The ID of the folder to upload the file to.
+        - file_path: The path to the files to upload.
+        """
+        file_name = os.path.basename(file_path)
+        file_metadata = {"name": file_name, "parents": [folder_id]}
 
-def upload_to_drive(drive_service, folder_id, file_path):
-    """
-    Upload a file to a given folder on Google Drive.
-    Parameters:
-    - drive_service: The Drive API service instance.
-    - folder_id: The ID of the folder to upload the file to.
-    - file_path: The path to the files to upload.
-    """
-    file_name = os.path.basename(file_path)
-    file_metadata = {"name": file_name, "parents": [folder_id]}
+        # Check if the file already exists in the folder
+        existing_file_id = get_file_id(drive_service, folder_id, file_name)
 
-    # Check if the file already exists in the folder
-    existing_file_id = get_file_id(drive_service, folder_id, file_name)
+        media = MediaFileUpload(file_path, resumable=True)
 
-    media = MediaFileUpload(file_path, resumable=True)
+        try:
+            if existing_file_id:
+                # Update the existing file (Note: We remove the 'parents' key from the metadata)
+                update_metadata = {"name": file_name}
+                request = drive_service.files().update(
+                    fileId=existing_file_id,
+                    body=update_metadata,
+                    media_body=media,
+                    fields="id",
+                )
+                file_info = request.execute()
+                print(
+                    f"\t{current_time()}Updated {file_path} on Drive, File ID: {file_info['id']}"
+                )
+            else:
+                # Create a new file
+                request = drive_service.files().create(
+                    body=file_metadata, media_body=media, fields="id"
+                )
+                file_info = request.execute()
+                print(
+                    f"\t{current_time()}Uploaded {file_path} to Drive, File ID: {file_info['id']}"
+                )
+        except HttpError as error:
+            print(f"\t{current_time()}An error occurred: {error}")
 
-    try:
-        if existing_file_id:
-            # Update the existing file (Note: We remove the 'parents' key from the metadata)
-            update_metadata = {"name": file_name}
-            request = drive_service.files().update(
-                fileId=existing_file_id,
-                body=update_metadata,
-                media_body=media,
-                fields="id",
-            )
-            file_info = request.execute()
-            print(f"\tUpdated {file_path} on Drive, File ID: {file_info['id']}")
-        else:
-            # Create a new file
-            request = drive_service.files().create(
-                body=file_metadata, media_body=media, fields="id"
-            )
-            file_info = request.execute()
-            print(f"\tUploaded {file_path} to Drive, File ID: {file_info['id']}")
-    except HttpError as error:
-        print(f"\tAn error occurred: {error}")
+    # Routine that perfom Authentication and upload steps
+    # Path to the service account JSON key file
 
+    service_account_file = "feedbackloop-399807-300aec3efe37.json"
 
-# Routine that perfom Authentication and upload steps
-# Path to the service account JSON key file
+    # The ID of the folder where you want to upload the file.
+    # You can get this from the folder's URL on Google Drive: https://drive.google.com/drive/folders/YOUR_FOLDER_ID
+    FOLDER_ID = "1G1YUlZZQV52sBZ1lpefHcV2EbPb8u8M-"  # the folder ID of Projects/HW Minutes/ folder to store the files
 
-service_account_file = "feedbackloop-399807-300aec3efe37.json"
+    creds = ServiceAccountCredentials.from_service_account_file(
+        service_account_file, scopes=["https://www.googleapis.com/auth/drive.file"]
+    )
 
-# The ID of the folder where you want to upload the file.
-# You can get this from the folder's URL on Google Drive: https://drive.google.com/drive/folders/YOUR_FOLDER_ID
-FOLDER_ID = "1G1YUlZZQV52sBZ1lpefHcV2EbPb8u8M-"  # the folder ID of Projects/HW Minutes/ folder to store the files
+    # Build the Drive API client once
+    drive_service = build("drive", "v3", credentials=creds)
 
-creds = ServiceAccountCredentials.from_service_account_file(
-    service_account_file, scopes=["https://www.googleapis.com/auth/drive.file"]
+    # Path to the folder containing the files you want to upload
+    folder_path = "./reports"
+
+    for file_name in os.listdir(folder_path):
+        file_path = os.path.join(folder_path, file_name)
+
+        # Check if it's a regular file (and not a directory)
+        if os.path.isfile(file_path):
+            upload_to_drive(drive_service, FOLDER_ID, file_path)
+
+print(
+    f"\n{current_time()}Total reports prepare time: {time.time() - start_time} seconds.\n{current_time()}All done."
 )
-
-# Build the Drive API client once
-drive_service = build("drive", "v3", credentials=creds)
-
-
-# Path to the folder containing the files you want to upload
-folder_path = "./reports"
-
-for file_name in os.listdir(folder_path):
-    file_path = os.path.join(folder_path, file_name)
-
-    # Check if it's a regular file (and not a directory)
-    if os.path.isfile(file_path):
-        upload_to_drive(drive_service, FOLDER_ID, file_path)
-
-print(f"\nTotal reports prepare time: {time.time() - start_time} seconds.\nAll done.")
