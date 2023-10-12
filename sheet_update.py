@@ -37,20 +37,27 @@ def gs_sheet_update(client, spreadsheet_id, worksheet_name, range_name, df):
         worksheet = sheet.worksheet(worksheet_name)
         print(f"{current_time()}Worksheet {worksheet_name} opened")
     except:
-        worksheet = sheet.add_worksheet(title=worksheet_name, rows="1000", cols="10")
-        print(f"{current_time()}Worksheet not found. New worksheet created.")
+        try:
+            worksheet = sheet.add_worksheet(title=worksheet_name, rows="1000", cols="10")
+            print(f"{current_time()}Worksheet not found. New worksheet created.")
+        except Exception as e:
+            print(f'{current_time()} {e}')
 
     if worksheet != None:
         values = [df.columns.values.tolist()] + df.values.tolist()
         # update worksheet with data from dataframe
-        worksheet.update(values=values, range_name=range_name)
+        try:
+            worksheet.update(values=values, range_name=range_name)
+        except Exception as e:
+            print(f'{current_time()} {e}')
+            
 
         # update format for cell range
         cell_format = {"numberFormat": {"type": "TIME", "pattern": "hh:mm"}}
         try:
-            worksheet.format(ranges="G1:G100", format=cell_format)
+            worksheet.format(ranges="G:G", format=cell_format)
         except Exception as e:
-            print(e)
+            print(f'{current_time()} {e}')
             print(f"{current_time()}Error while updating format for cell range!")
 
         return True
