@@ -6,6 +6,7 @@ import gspread
 import time, datetime
 import pandas as pd
 import os, ast, pprint
+import random
 
 
 # authenticate with Google service accout and return client
@@ -20,10 +21,36 @@ def gs_authentificate():
     return gspread.authorize(creds)
 
 
-# define function whihc update formate for certane cell range in the worksheet
+# function which retry on failure
+def retry_on_failure(num_attempts=5, timeout=5, delay=1):
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            for attempt in range(1, num_attempts + 1):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    print(f"{current_time()} Attempt {attempt} failed with error: {e}")
+                    if "The service is currently unavailable" in str(e):
+                        print(f"{current_time()} Applying exponential backoff.")
+                        time.sleep(
+                            (2**attempt) + random.random()
+                        )  # exponential backoff
+                    else:
+                        time.sleep(delay)  # regular delay
+                    if attempt == num_attempts:
+                        print(f"{current_time()} Max attempts reached. Giving up.")
+                        raise
+
+        return wrapper
+
+    return decorator
+
+
+# define function whihc update formate for certain cell range in the worksheet
 
 
 # define function which open Google Spreadsheet by ID and Worksheet by name and update it wiht data from pandas dataframe
+@retry_on_failure(num_attempts=3, timeout=5, delay=1)
 def gs_sheet_update(client, spreadsheet_id, worksheet_name, range_name, df):
     # try to open the spreadsheet by SPREADSHEET_ID by client
     try:
@@ -49,9 +76,8 @@ def gs_sheet_update(client, spreadsheet_id, worksheet_name, range_name, df):
         try:
             worksheet.update(values=values, range_name=range_name)
         except Exception as e:
-            print(f'{current_time()} {e}')
-            
-
+            print(f"{current_time()} {e}")
+        time.sleep(1)
         # update format for cell range
         cell_format = {"numberFormat": {"type": "TIME", "pattern": "hh:mm"}}
         try:
